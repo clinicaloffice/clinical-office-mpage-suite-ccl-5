@@ -7320,10 +7320,7 @@ endif
 if (validate(payload->customscript->script[nscript]->parameters.action) != 1)
     go to end_program
 endif
- 
-; Execute Common functions
-execute bc_all_all_std_routines
- 
+  
 ; Define subroutines
 declare init(null)=null
  
