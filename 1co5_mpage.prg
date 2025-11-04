@@ -4563,7 +4563,7 @@ if (validate(payload->encounter->personReltn, 0) = 1)
         rEncounter->encounters[nPos].person_reltn[nCount].relation_seq = epr.relation_seq
 
         if (validate(payload->encounter->loadExtendedPersons, 0) = 1)
-            call add_prsnl(epr.related_person_id)
+            call add_person_to_patient_source(epr.related_person_id)
         endif    
 		
     with counter, expand=2
