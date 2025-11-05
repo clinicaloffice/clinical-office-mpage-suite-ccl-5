@@ -5073,6 +5073,7 @@ END GO
  Rev    Date     By             Comments
  ------ -------- -------------- ------------------------------------------
  001    12/12/24 J. Simpson     Initial Development
+ 002    11/05/25 J. Simpson     Added cnvtWebDate subroutine
  *************************************************************************/
  
 DROP PROGRAM 1co5_mpage_entry:group1 GO
@@ -5108,6 +5109,7 @@ declare add_prsnl(nPersonId=f8)=null
 declare add_organization(nOrganizationId=f8)=null
 declare camel_field(cText=vc)=vc
 declare writeDebugSession(null)=null
+declare cnvtWebDate(cDate=vc, nEndOfDay=i4(value,0))=dq8
 
 ; Record structure definitions
 ; Define run stats record structure
@@ -5586,6 +5588,21 @@ subroutine add_organization(nOrganizationId)
         set parent_values->data[size(parent_values->data, 5)].parent_entity_name = "ORGANIZATION"
     endif
     
+end
+
+; Converts a web date in the format of yyyy-mm-dd or yyyy-mm-ddThh:MM into an Oracle Date/Time field
+; If time is included it will be used, otherwise the nEndOfDay flag of 1 will indicate a time of 235959
+subroutine cnvtWebDate(cDate, nEndOfDay)	
+	if (trim(cDate) != "")
+		declare nDate = i4 with noconstant(cnvtdate2(substring(1,10,cDate),"yyyy-mm-dd"))
+		declare nTime = i4 with noconstant(evaluate(nEndOfDay, 0, 0, 235959))
+		if (substring(11, 1, cDate) = "T")
+			set nTime = cnvtint(cnvtalphanum(substring(12, 5, cDate)))			
+		endif
+		return (cnvtdatetime(nDate, nTime))
+	else		
+		return (0)
+	endif		
 end
  
 end go
