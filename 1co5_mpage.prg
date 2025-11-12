@@ -5783,6 +5783,7 @@ record rPerson (
             3 person_reltn_cd           = f8
             3 related_person_reltn_cd   = f8
         2 person_plan_reltn[*]
+            3 person_plan_reltn_id      = f8
             3 health_plan_id            = f8
             3 person_plan_r             = vc
             3 person_plan_r_cd          = f8
@@ -6009,6 +6010,7 @@ if (validate(payload->person->personPlanReltn, 0) = 1)
             nPlanCount = size(rPerson->persons[nNum].person_plan_reltn, 5)+1
             stat = alterlist(rPerson->persons[nNum].person_plan_reltn, nPlanCount)
         
+            rPerson->persons[nNum].person_plan_reltn[nPlanCount].person_plan_reltn_id = ppr.person_plan_reltn_id
             rPerson->persons[nNum].person_plan_reltn[nPlanCount].health_plan_id = ppr.health_plan_id
             rPerson->persons[nNum].person_plan_reltn[nPlanCount].person_plan_r = uar_get_code_display(ppr.person_plan_r_cd)
             rPerson->persons[nNum].person_plan_reltn[nPlanCount].person_plan_r_cd = ppr.person_plan_r_cd
