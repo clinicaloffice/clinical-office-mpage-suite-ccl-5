@@ -458,7 +458,9 @@ record rTemp (
  
 ; Declare variables and subroutines
 declare nNum = i4
+declare nAliasQual = i4
 set rCustom->status->type = "person"
+
 declare addTemp(nPersonId=f8, nEncntrId=f8, nForceAdd=i4)=null
 subroutine addTemp(nPersonId, nEncntrId, nForceAdd)
     if (nForceAdd = 1)
@@ -484,8 +486,6 @@ end
 declare cv48_Active = f8 with noconstant(uar_get_code_by("MEANING", 48, "ACTIVE"))
 declare cv302_Person = f8 with noconstant(uar_get_code_by("MEANING", 302, "PERSON"))
 
-call echorecord(payload->customscript->script[nscript]->parameters)
-
 ; Search ENCNTR_ALIAS
 if (validate(payload->customscript->script[nscript]->parameters->encntrAlias) > 0)
     if (size(payload->customscript->script[nscript]->parameters->encntrAlias, 5) > 0)
@@ -509,6 +509,7 @@ if (validate(payload->customscript->script[nscript]->parameters->encntrAlias) > 
         order person_id        
         detail        
             call addTemp(person_id, ea.encntr_id, 0)
+            nAliasQual = 1
         with expand=1, counter        
     endif
 endif
@@ -533,6 +534,7 @@ if (validate(payload->customscript->script[nscript]->parameters->personAlias) > 
         order person_id        
         detail        
             call addTemp(person_id, 0.0, 0)
+            nAliasQual = 1
         with expand=1, counter        
     endif        
 endif
@@ -580,13 +582,8 @@ if (validate(payload->customscript->script[nscript]->parameters->sexCd) > 0)
     endif            
 endif
 
-call echo("test zone")
-call echo(cLastName)
-call echo(cFirstName)
-call echo(cPersonSearchParser)
-
 ; Collect a count of the last name
-if (size(cLastName) > 1)
+if (size(cLastName) > 1 and nAliasQual = 0)
     set rTemp->qual_match = rTemp->qual_match + 1
 
     select into "nl:"
@@ -635,8 +632,7 @@ if (validate(payload->customscript->script[nscript]->parameters->personId, 0) > 
         set rCustom->status->type = "encounter"
 ;    endif        
     
-    select ;into "nl:"
-        e.*
+    select into "nl:"
     from    encounter           e
     plan e
         where e.person_id = payload->customscript->script[nscript]->parameters->personId
@@ -651,7 +647,6 @@ if (validate(payload->customscript->script[nscript]->parameters->personId, 0) > 
     
 endif
 
-call echorecord(rtemp)
 
 ; Update the Patient Source with the valid qualifiers
 for (nLoop = 1 to size(rTemp->data, 5))
@@ -673,8 +668,6 @@ for (nLoop = 1 to size(rTemp->data, 5))
     endif
 endfor
 
-
-
 ; Update the status values
 if (rCustom->status.code = 0)
     if (size(patient_source->patients, 5) = 0 or 
@@ -685,8 +678,6 @@ if (rCustom->status.code = 0)
 endif
 
 call add_custom_output(cnvtrectojson(rCustom, 4, 1))
-
-call echo("Done First Search")
  
 #end_program
  
@@ -3320,8 +3311,11 @@ free record response
 record response (
     1 url               = vc
     1 component         = vc
+    1 cache             = vc
     1 success_ind       = i4
 )
+
+set response->cache = build("?", format(sysdate, "yyyymmddhhmmss;;q"))
  
 ; Collect component path
 select into "nl:"
@@ -5102,6 +5096,8 @@ declare cv48_Active = f8 with noconstant(uar_get_code_by("MEANING", 48, "ACTIVE"
 declare nCopyChartIdToPayload = i4 with noconstant(0)
 declare nPos = i4
 declare nNum = i4
+declare cErrorMessage = c132
+declare cErrors = vc
 
 ; Subroutine declarations
 declare add_ref_code_set(cObjectName=vc, cColumnName=vc, cDescription=vc, nCodeSet=i4)=null
@@ -5112,6 +5108,7 @@ declare add_organization(nOrganizationId=f8)=null
 declare camel_field(cText=vc)=vc
 declare writeDebugSession(null)=null
 declare cnvtWebDate(cDate=vc, nEndOfDay=i4(value,0))=dq8
+declare report_ccl_error(null)=null
 
 ; Record structure definitions
 ; Define run stats record structure
@@ -5333,6 +5330,7 @@ if (size(patient_source->visits, 5) = 0)
         set patient_source->patients[1].person_id = $person_id
     endif
 endif
+
  
 ; ******************************************************************************************
 ; Execute Pre-CCL scripts (These are scripts that need to run first as they may populate the
@@ -5376,21 +5374,9 @@ if ($debug_ind = 0)
 endif
  
 #FINALIZE_PAYLOAD
- 
-; Add any CCL Errors to the reply string
-declare cErrorMessage = c132
-declare cErrors = vc
-declare nErrorCode = i4 with noconstant(1)
-while (nErrorCode != 0)
-    set nErrorCode = error(cErrorMessage, 0)
-    if (nErrorCode != 0)
-        if (trim(cErrors) != "")
-            set cErrors = concat(trim(cErrors), ",")
-        endif
-        set cErrors = concat(trim(cErrors), ^{"code":^, build(nErrorCode), ^,"message":"^, trim(cErrorMessage), ^"}^)
-    endif
-endwhile
-set cErrors = concat(^"errors":[^, trim(cErrors), ^]^)
+
+    set cErrors = concat(^"errors":[^, trim(cErrors), ^]^)
+
  
 ; Generate the final _Memory_Reply_String
 SET RUN_STATS->END_TIME = SYSDATE
@@ -5416,6 +5402,21 @@ SUBROUTINE (FIXJSON(cJSON = vc) = vc WITH COPY)
 	SET cJSON = SUBSTRING(2, SIZE(cJSON) - 2, cJSON)
 	RETURN(cJSON)
 END
+
+; Records error messages to log
+subroutine report_ccl_error(null) 
+    declare nErrorCode = i4 with noconstant(1)
+    
+    while (nErrorCode != 0)
+        set nErrorCode = error(cErrorMessage, 0)
+        if (nErrorCode != 0)
+            if (trim(cErrors) != "")
+                set cErrors = concat(trim(cErrors), ",")
+            endif
+            set cErrors = concat(trim(cErrors), ^{"code":^, build(nErrorCode), ^,"message":"^, trim(cErrorMessage), ^"}^)
+        endif
+    endwhile
+end
  
 ; Runs the custom script pre or post block
 subroutine run_custom(cType)
@@ -5425,6 +5426,7 @@ subroutine run_custom(cType)
 			if (cnvtupper(payload->customscript->script[nScript].run) = cnvtupper(cType))
 				call parser(concat("execute ", trim(payload->customscript->script[nScript].name), " go"))
 			endif
+			call report_ccl_error(0)
 		endfor
 		set _Memory_Reply_String = concat(_Memory_Reply_String, ^]^)
 	endif
