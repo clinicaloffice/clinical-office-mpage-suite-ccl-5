@@ -7311,7 +7311,7 @@ with OUTDEV
  
 ; Check to see where running from.
 if (validate(patient_source) = 0)
-    execute 1co5_mpage_redirect:group1 ^MINE^,^https://www.clinicaloffice.com/mpages/clinical-office-mpage-setup^
+    execute 1co5_mpage_redirect:group1 ^MINE^,^clinical-office-mpage-setup^
 endif
  
 ; This is the point where you would add your custom CCL code to collect data. If you did not
