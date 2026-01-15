@@ -4085,6 +4085,7 @@ END GO
  Rev    Date     By             Comments
  ------ -------- -------------- ------------------------------------------
  001    08/31/25 J. Simpson     Initial Development
+ 002    01/13/26 J. Simpson     Fixes to encntr_plan_reltn code
  *************************************************************************/
 
 drop program 1co5_mpage_encounter:group1 go
@@ -4658,9 +4659,10 @@ endif
 ; ----------------------------------------------------------------
 if (validate(payload->encounter->encounterPlanReltn, 0) = 1)
 
-    select into "nl:"
-        person_id               = epr.person_id,
+    select ; into "nl:"
+        encntr_id               = epr.encntr_id,
         priority_seq            = epr.priority_seq
+        ,epr.*
     from    encntr_plan_reltn        epr,
             health_plan              hp,
             long_text                lt
@@ -4673,80 +4675,85 @@ if (validate(payload->encounter->encounterPlanReltn, 0) = 1)
         where hp.health_plan_id = epr.health_plan_id
     join lt
         where lt.long_text_id = outerjoin(epr.coverage_comments_long_text_id)
-    order person_id, priority_seq
-    detail
-        nPos = locateval(nNum, 1, size(rEncounter->encounters, 5), epr.person_id, rEncounter->encounters[nNum].person_id)
-    
-        nPlanCount = size(rEncounter->encounters[nNum].encntr_plan_reltn, 5)+1
-        stat = alterlist(rEncounter->encounters[nNum].encntr_plan_reltn, nPlanCount)
+    order encntr_id, priority_seq
+    head encntr_id
+        nPos = locateval(nNum, 1, size(rEncounter->encounters, 5), epr.encntr_id, rEncounter->encounters[nNum].encntr_id)
+    detail            
+        nPlanCount = size(rEncounter->encounters[nPos].encntr_plan_reltn, 5)+1
+        stat = alterlist(rEncounter->encounters[nPos].encntr_plan_reltn, nPlanCount)
+        col 0, nPos, nPlanCount, row + 1
         
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].encntr_plan_reltn_id = epr.encntr_plan_reltn_id
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].person_plan_reltn_id = epr.person_plan_reltn_id
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].person_id = epr.person_id
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].health_plan_id = epr.health_plan_id
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].organization_id = epr.organization_id
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].priority_seq = epr.priority_seq
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].member_nbr = epr.member_nbr
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].signature_on_file = 
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].encntr_plan_reltn_id = epr.encntr_plan_reltn_id
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].person_plan_reltn_id = epr.person_plan_reltn_id
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].person_id = epr.person_id
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].health_plan_id = epr.health_plan_id
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].organization_id = epr.organization_id
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].priority_seq = epr.priority_seq
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].member_nbr = evaluate(trim(epr.member_nbr),"",
+                                                                    epr.subs_member_nbr,epr.member_nbr)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].signature_on_file = 
                 uar_get_code_display(epr.signature_on_file_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].signature_on_file_cd = epr.signature_on_file_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].balance_type = uar_get_code_display(epr.balance_type_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].balance_type_cd = epr.balance_type_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].deduct_amt = epr.deduct_amt
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].deduct_met_amt = epr.deduct_met_amt
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].deduct_met_dt_tm = epr.deduct_met_dt_tm
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].verify_status = uar_get_code_display(epr.verify_status_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].verify_status_cd = epr.verify_status_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].verify_dt_tm = epr.verify_dt_tm
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].verify_prsnl_id = epr.verify_prsnl_id
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].insured_card_name = epr.insured_card_name
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].group_name = hp.group_name
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].group_nbr = hp.group_nbr
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].policy_nbr = hp.policy_nbr
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].member_person_code = epr.member_person_code
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].life_rsv_days = epr.life_rsv_days
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].life_rsv_remain_days = epr.life_rsv_remain_days
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].life_rsv_daily_ded_amt = epr.life_rsv_daily_ded_amt
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].life_rsv_daily_ded_qual = 
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].signature_on_file_cd = epr.signature_on_file_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].balance_type = uar_get_code_display(epr.balance_type_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].balance_type_cd = epr.balance_type_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].deduct_amt = epr.deduct_amt
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].deduct_met_amt = epr.deduct_met_amt
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].deduct_met_dt_tm = epr.deduct_met_dt_tm
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].verify_status = uar_get_code_display(epr.verify_status_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].verify_status_cd = epr.verify_status_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].verify_dt_tm = epr.verify_dt_tm
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].verify_prsnl_id = epr.verify_prsnl_id
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].insured_card_name = epr.insured_card_name
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].group_name = hp.group_name
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].group_nbr = hp.group_nbr
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].policy_nbr = hp.policy_nbr
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].member_person_code = epr.member_person_code
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].life_rsv_days = epr.life_rsv_days
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].life_rsv_remain_days = epr.life_rsv_remain_days
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].life_rsv_daily_ded_amt = epr.life_rsv_daily_ded_amt
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].life_rsv_daily_ded_qual = 
                                                                            uar_get_code_display(epr.life_rsv_daily_ded_qual_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].life_rsv_daily_ded_qual_cd = epr.life_rsv_daily_ded_qual_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].card_issue_nbr = epr.card_issue_nbr
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].card_category = uar_get_code_display(epr.card_category_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].card_category_cd = epr.card_category_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].program_status = uar_get_code_display(epr.program_status_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].program_status_cd = epr.program_status_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].denial_reason = uar_get_code_display(epr.denial_reason_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].denial_reason_cd = epr.denial_reason_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].coverage_comments = lt.long_text
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].verify_source = uar_get_code_display(epr.verify_source_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].verify_source_cd = epr.verify_source_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].ext_payer_name = epr.ext_payer_name
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].ext_payer_ident = epr.ext_payer_ident
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].alt_member_nbr = epr.alt_member_nbr
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].generic_health_plan_name = epr.generic_health_plan_name
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].plan_type = uar_get_code_display(hp.plan_type_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].plan_type_cd = hp.plan_type_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].plan_class = uar_get_code_display(hp.plan_class_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].plan_class_cd = hp.plan_class_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].plan_name = hp.plan_name
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].plan_desc = hp.plan_desc
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].financial_class = uar_get_code_display(hp.financial_class_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].financial_class_cd = hp.financial_class_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].baby_coverage = uar_get_code_display(hp.baby_coverage_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].baby_coverage_cd = hp.baby_coverage_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].comb_baby_bill = uar_get_code_display(hp.comb_baby_bill_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].comb_baby_bill_cd = hp.comb_baby_bill_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].service_type = uar_get_code_display(hp.service_type_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].service_type_cd = hp.service_type_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].plan_category = uar_get_code_display(hp.plan_category_cd)
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].plan_category_cd = hp.plan_category_cd
-        rEncounter->encounters[nNum].encntr_plan_reltn[nPlanCount].priority_ranking_nbr = hp.priority_ranking_nbr
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].life_rsv_daily_ded_qual_cd = epr.life_rsv_daily_ded_qual_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].card_issue_nbr = epr.card_issue_nbr
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].card_category = uar_get_code_display(epr.card_category_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].card_category_cd = epr.card_category_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].program_status = uar_get_code_display(epr.program_status_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].program_status_cd = epr.program_status_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].denial_reason = uar_get_code_display(epr.denial_reason_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].denial_reason_cd = epr.denial_reason_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].coverage_comments = lt.long_text
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].verify_source = uar_get_code_display(epr.verify_source_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].verify_source_cd = epr.verify_source_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].ext_payer_name = epr.ext_payer_name
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].ext_payer_ident = epr.ext_payer_ident
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].alt_member_nbr = epr.alt_member_nbr
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].generic_health_plan_name = epr.generic_health_plan_name
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].plan_type = uar_get_code_display(hp.plan_type_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].plan_type_cd = hp.plan_type_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].plan_class = uar_get_code_display(hp.plan_class_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].plan_class_cd = hp.plan_class_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].plan_name = hp.plan_name
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].plan_desc = hp.plan_desc
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].financial_class = uar_get_code_display(hp.financial_class_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].financial_class_cd = hp.financial_class_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].baby_coverage = uar_get_code_display(hp.baby_coverage_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].baby_coverage_cd = hp.baby_coverage_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].comb_baby_bill = uar_get_code_display(hp.comb_baby_bill_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].comb_baby_bill_cd = hp.comb_baby_bill_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].service_type = uar_get_code_display(hp.service_type_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].service_type_cd = hp.service_type_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].plan_category = uar_get_code_display(hp.plan_category_cd)
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].plan_category_cd = hp.plan_category_cd
+        rEncounter->encounters[nPos].encntr_plan_reltn[nPlanCount].priority_ranking_nbr = hp.priority_ranking_nbr
         
         if (validate(payload->encounter->loadExtendedPersons, 0) = 1)
             call add_organization(epr.organization_id)
             call add_prsnl(epr.verify_prsnl_id)
+            if (epr.person_id != rEncounter->encounters[nPos].person_id)
+                call add_person_to_patient_source(epr.person_id)
+            endif
         endif
-            
+           
     with expand=2, uar_code(d)
 
 endif
