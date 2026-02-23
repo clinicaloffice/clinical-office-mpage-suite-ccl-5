@@ -5077,6 +5077,7 @@ END GO
  ------ -------- -------------- ------------------------------------------
  001    12/12/24 J. Simpson     Initial Development
  002    11/05/25 J. Simpson     Added cnvtWebDate subroutine
+ 003    02/11/26 J. Simpson     Added lookup to determine if custom tables setup
  *************************************************************************/
  
 DROP PROGRAM 1co5_mpage_entry:group1 GO
@@ -5135,7 +5136,8 @@ record run_stats (
 	1 physician_ind        = i4
 	1 position_cd          = f8
 	1 position             = vc
-	1 username            = vc
+	1 username             = vc
+	1 custom_tables[*]     = vc
 )
 
 ; Chart Record Structure
@@ -5224,6 +5226,15 @@ detail
     run_stats->username = p.username
 with counter
 
+; Check for existence of Clinical Office Custom tables
+select into "nl:"
+from dba_tables         dt
+plan dt
+    where dt.table_name in (^CUST_CO_REFERENCE^)
+detail    
+    stat = alterlist(run_stats->custom_tables, size(run_stats->custom_tables, 5)+1)
+    run_stats->custom_tables[size(run_stats->custom_tables, 5)] = cnvtlower(dt.table_name)
+with counter
 
 ; Abort if invalid payload    
 if (validate(payload) = 0)
@@ -6095,8 +6106,7 @@ if (validate(payload->person->personPlanReltn, 0) = 1)
             call add_prsnl(ppr.verify_prsnl_id)
             call add_person_to_patient_source(ppr.subscriber_person_id)
 ;            call loadPersons(null)
-        endif
-    
+        endif    
     
     with expand=2, uar_code(d)
 
@@ -7254,6 +7264,394 @@ call echo(_Memory_Reply_String)
 #end_program
  
 end go
+/*************************************************************************
+ 
+        Script Name:    1co5_mpage_ref_data.prg
+ 
+        Description:    Clinical Office - MPage Developer
+        				Custom Clinical OFfice Read/Write Scripts
+ 
+        Date Written:   February 8, 2026
+        Written by:     John Simpson
+                        Precision Healthcare Solutions
+ 
+ *************************************************************************
+		   Copyright (c) 2026 Precision Healthcare Solutions
+ 
+ NO PART OF THIS CODE MAY BE COPIED, MODIFIED OR DISTRIBUTED WITHOUT
+ PRIOR WRITTEN CONSENT OF PRECISION HEALTHCARE SOLUTIONS EXECUTIVE
+ LEADERSHIP TEAM.
+ 
+ FOR LICENSING TERMS PLEASE VISIT https://www.clinicaloffice.com
+ 
+ *************************************************************************
+                            Special Instructions
+ *************************************************************************
+ Called from 1CO5_MPAGE_ENTRY. Do not attempt to run stand alone. If you
+ wish to test the development of your custom script from the CCL back-end,
+ please run with 1CO5_MPAGE_TEST.
+ 
+ Possible Payload values:
+ 
+	"customScript": {
+		"script": [
+			"name": "1CO5_MPAGE_REF_DATA:GROUP1",
+			"id": "identifier for your output, omit if you won't be returning data",
+			"run": "pre or post",
+			"parameters": {
+				"action": "[r] read, [ra] read all including inactive, [w] write, [i] inactivate or [d] delete",
+				"data": [{
+					"refName": "string",
+					"refTask": "string",
+					"Description": "string",
+					"parentEntityId": number,
+					"parentEntityName": "string",
+					"refText": "string"
+				}]
+			}
+		],
+		"clearPatientSource": true
+	}
+ 
+ 
+ *************************************************************************
+                            Revision Information
+ *************************************************************************
+ Rev    Date     By             Comments
+ ------ -------- -------------- ------------------------------------------
+ 001    02/08/26 J. Simpson     Initial Development
+ *************************************************************************/
+drop program 1co5_mpage_ref_data:group1 go
+create program 1co5_mpage_ref_data:group1
+
+; Execute the library script with all subroutines
+execute 1co5_mpage_ref_data_lib:group1 
+
+declare cAction = vc
+
+; Check the action and perform the correct tasks
+if (validate(payload->customscript->script[nscript]->action) = 1 and validate(payload->customScript->script[nScript].data) = 1)
+    
+    set cAction = cnvtlower(payload->customScript->script[nScript]->action)   
+    
+    set stat = alterlist(rRefTemp->data, size(payload->customScript->script[nScript].data, 5))
+    for (nLoop = 1 to size(payload->customScript->script[nScript].data, 5))
+        set rRefTemp->data[nLoop].ref_name = payload->customScript->script[nScript].data[nLoop].refName
+        set rRefTemp->data[nLoop].ref_task = payload->customScript->script[nScript].data[nLoop].refTask
+        if (validate(payload->customScript->script[nScript].data[nLoop].description) = 1)
+            set rRefTemp->data[nLoop].description = payload->customScript->script[nScript].data[nLoop].description
+        endif
+        if (validate(payload->customScript->script[nScript].data[nLoop].parentEntityId) = 1 and 
+                validate(payload->customScript->script[nScript].data[nLoop].parentEntityName) = 1)
+            set rRefTemp->data[nLoop].qual_parent_entity = 1
+            set rRefTemp->data[nLoop].parent_entity_id = payload->customScript->script[nScript].data[nLoop].parentEntityId
+            set rRefTemp->data[nLoop].parent_entity_name = payload->customScript->script[nScript].data[nLoop].parentEntityName
+        endif
+        if (validate(payload->customScript->script[nScript].data[nLoop].refText) = 1)
+            set rRefTemp->data[nLoop].ref_text = payload->customScript->script[nScript].data[nLoop].refText
+        endif
+        
+        set rRefTemp->data[nLoop].create_dt_tm = sysdate
+        set rRefTemp->data[nLoop].create_prsnl_id = reqinfo->updt_id
+        set rRefTemp->data[nLoop].beg_effective_dt_tm = sysdate
+    endfor
+            
+    ; Read the records (Needed for read operation and write to provide updates)
+    ; Using a loop instead of expand 
+    if (cAction in (^r^, ^ra^, ^w^))
+        call readRefData(cAction)
+    endif
+    
+    ; Run appropriate write/delete/inactivate routines
+    case (cAction)
+        of ^w^: call writeRefData(null)
+        of ^d^: call deleteRefData(null)
+        of ^i^: call inactivateRefData(null)
+    endcase
+endif
+
+; Write the output back to the MPage
+call add_custom_output(cnvtrectojson(rRef, 4, 1)) 
+ 
+#end_program
+ 
+end go
+ 
+/*************************************************************************
+ 
+        Script Name:    1co5_mpage_ref_data.prg
+ 
+        Description:    Clinical Office - MPage Developer
+        				Custom Clinical OFfice Read/Write Script Subroutine Library
+ 
+        Date Written:   February 8, 2026
+        Written by:     John Simpson
+                        Precision Healthcare Solutions
+ 
+ *************************************************************************
+		   Copyright (c) 2026 Precision Healthcare Solutions
+ 
+ NO PART OF THIS CODE MAY BE COPIED, MODIFIED OR DISTRIBUTED WITHOUT
+ PRIOR WRITTEN CONSENT OF PRECISION HEALTHCARE SOLUTIONS EXECUTIVE
+ LEADERSHIP TEAM.
+ 
+ FOR LICENSING TERMS PLEASE VISIT https://www.clinicaloffice.com
+ 
+ *************************************************************************
+                            Special Instructions
+ *************************************************************************
+
+ Subroutines for the purpose of reading, writing, deleting and inactivating
+ rows from cust_co_reference
+ 
+ *************************************************************************
+                            Revision Information
+ *************************************************************************
+ Rev    Date     By             Comments
+ ------ -------- -------------- ------------------------------------------
+ 001    02/08/26 J. Simpson     Initial Development
+ *************************************************************************/
+drop program 1co5_mpage_ref_data_lib:group1 go
+create program 1co5_mpage_ref_data_lib:group1
+ 
+; Misc variables
+declare nMaxRecLen = i4 with noconstant(32000), persistscript
+
+declare readRefData(cAction=vc)=null with persistscript
+declare writeRefData(null)=null with persistscript
+declare deleteRefData(null)=null with persistscript
+declare inactivateRefData(null)=null with persistscript
+  
+; Working structure
+free record rRefTemp
+record rRefTemp (
+    1 data[*]
+        2 ref_name                  = vc
+        2 ref_task                  = vc
+        2 description               = vc
+        2 qual_parent_entity        = i4
+        2 parent_entity_id          = f8
+        2 parent_entity_name        = vc
+        2 ref_text                  = vc
+        2 records                   = i4
+        2 create_dt_tm              = dq8
+        2 create_prsnl_id           = f8
+        2 beg_effective_dt_tm       = dq8
+) with persistscript
+  
+; Output structure
+free record rRef
+record rRef (
+    1 action                        = vc
+	1 data[*]
+        2 ref_name                  = vc
+        2 ref_task                  = vc
+        2 description               = vc
+        2 parent_entity_id          = f8
+        2 parent_entity_name        = vc
+        2 ref_text                  = vc
+        2 create_prsnl_id           = f8
+        2 create_prsnl_name         = vc
+        2 active_ind                = i4
+        2 updt_id                   = f8
+        2 updt_name                 = vc
+        2 updt_dt_tm                = dq8
+        2 beg_effective_dt_tm       = dq8
+        2 end_effective_dt_tm       = dq8
+) with persistscript
+
+; Read Reference Data
+subroutine readRefData(cAction)
+    declare cParser = vc with noconstant("1=1")
+    set rRef->action = cAction
+    
+    for (nLoop = 1 to size(rRefTemp->data, 5))
+        set cParser = evaluate(rRefTemp->data[nLoop].qual_parent_entity, 1, 
+                        concat(^cr.parent_entity_id=^, build(rRefTemp->data[nLoop].parent_entity_id),
+                            ^ and cr.parent_entity_name="^, trim(rRefTemp->data[nLoop].parent_entity_name), ^"^),
+                            ^1=1^)
+            
+        select into "nl:"
+            active_ind      = cr.active_ind,
+            sort_date       = format(cr.create_dt_tm, "yyyymmddhhmmss;;q"),
+            sequence        = cr.sequence
+        from    cust_co_reference   cr,
+                prsnl               pc,
+                prsnl               pu
+        plan cr
+            where cr.ref_name = rRefTemp->data[nLoop].ref_name
+            and cr.ref_task = rRefTemp->data[nLoop].ref_task
+            and parser(cParser)
+            and (cAction = ^ra^ or cr.active_ind = 1)
+        join pc
+            where pc.person_id = cr.create_prsnl_id
+        join pu
+            where pu.person_id = cr.updt_id
+        order active_ind desc, sort_date desc, sequence
+        head report
+            nCount = size(rRef->data, 5)
+        head active_ind
+            x = 0
+        head sort_date
+            nRecords = 0
+                
+            if (cAction in (^r^, ^ra^))
+                nCount = nCount + 1
+                stat = alterlist(rRef->data, nCount)
+                rRef->data[nCount].ref_name = cr.ref_name
+                 rRef->data[nCount].ref_task = cr.ref_task
+                 rRef->data[nCount].description = cr.description
+                 rRef->data[nCount].parent_entity_id = cr.parent_entity_id
+                 rRef->data[nCount].parent_entity_name = cr.parent_entity_name
+                 rRef->data[nCount].create_prsnl_id = cr.create_prsnl_id
+                 rRef->data[nCount].create_prsnl_name = pc.name_full_formatted
+                 rRef->data[nCount].active_ind = cr.active_ind
+                 rRef->data[nCount].updt_id = cr.updt_id
+                 rRef->data[nCount].updt_name = pu.name_full_formatted
+                 rRef->data[nCount].updt_dt_tm = cr.updt_dt_tm
+                 rRef->data[nCount].beg_effective_dt_tm = cr.beg_effective_dt_tm
+                 rRef->data[nCount].end_effective_dt_tm = cr.end_effective_dt_tm                    
+            endif
+        head sequence
+            nRecords = nRecords + 1
+                
+            if (cAction in (^r^, ^ra^))
+                rRef->data[nCount].ref_text = concat(trim(rRef->data[nCount].ref_text), cr.ref_text)
+            endif
+        foot sequence
+            x = 0
+        foot sort_date
+            if (active_ind = 1)
+                rRefTemp->data[nLoop].records = nRecords
+                rRefTemp->data[nLoop].create_dt_tm = cr.create_dt_tm
+                rRefTemp->data[nLoop].create_prsnl_id = cr.create_prsnl_id
+                rRefTemp->data[nLoop].beg_effective_dt_tm = cr.beg_effective_dt_tm                    
+            endif
+        with counter
+    endfor
+end
+
+; Writes new records    
+subroutine writeRefData(null) 
+
+    declare cWriteText = vc
+    declare _clf = i4
+    declare _cll = i4
+    
+    set rRef->action = ^w^
+
+    for (nLoop = 1 to size(rRefTemp->data, 5))
+        ; Determine the number of records to create/update
+        declare nPieces = i4 with noconstant(maxval(textlen(rRefTemp->data[nLoop].ref_text) / nMaxRecLen, 1))
+        if (textlen(rRefTemp->data[nLoop].ref_text) > nMaxRecLen 
+                    and mod(textlen(rRefTemp->data[nLoop].ref_text), nMaxRecLen) > 0)
+            set nPieces = nPieces + 1
+        endif
+            
+        set cParser = evaluate(rRefTemp->data[nLoop].qual_parent_entity, 1, 
+                        concat(^cr.parent_entity_id=^, build(rRefTemp->data[nLoop].parent_entity_id),
+                            ^ and cr.parent_entity_name="^, trim(rRefTemp->data[nLoop].parent_entity_name), ^"^),
+                            ^1=1^)
+            
+        ; Delete extra pieces
+        if (nPieces < rRefTemp->data[nLoop].records)
+            delete from cust_co_reference   cr
+            where cr.ref_name = rRefTemp->data[nLoop].ref_name
+            and cr.ref_task = rRefTemp->data[nLoop].ref_task
+            and parser(cParser)
+            and cr.sequence > nPieces
+            and cr.active_ind = 1
+        endif
+            
+        ; Write the pieces
+        for (nPiece = 1 to nPieces)
+            set _clf = ((nPiece-1)*nMaxRecLen)+1
+            set _cll = minval(_clf + nMaxRecLen, textlen(rRefTemp->data[nLoop].ref_text)+1)-_clf                
+            set cWriteText = substring(_clf, _cll, rRefTemp->data[nLoop].ref_text)
+
+            ; Insert a new record
+            if (rRefTemp->data[nLoop].records = 0 or nPiece > rRefTemp->data[nLoop].records)
+                insert into cust_co_reference   cr
+                set cr.ref_id = seq(cust_co_ref_seq, nextval),
+                    cr.ref_name = rRefTemp->data[nLoop].ref_name,
+                    cr.ref_task = rRefTemp->data[nLoop].ref_task,
+                    cr.description = rRefTemp->data[nLoop].description,
+                    cr.parent_entity_id = rRefTemp->data[nLoop].parent_entity_id,
+                    cr.parent_entity_name = rRefTemp->data[nLoop].parent_entity_name,
+                    cr.sequence = nPiece,
+                    cr.ref_text = cWriteText,
+                    cr.active_ind = 1,
+                    cr.create_prsnl_id = rRefTemp->data[nLoop].create_prsnl_id,
+                    cr.create_dt_tm = cnvtdatetime(rRefTemp->data[nLoop].create_dt_tm),
+                    cr.updt_id = reqinfo->updt_id,
+                    cr.updt_dt_tm = sysdate,
+                    cr.beg_effective_dt_tm = cnvtdatetime(rRefTemp->data[nLoop].beg_effective_dt_tm),
+                    cr.end_effective_dt_tm = cnvtdatetime("31-DEC-2100 23:59:59")
+            ; Perform an update
+            else
+                update into cust_co_reference    cr
+                set cr.description = rRefTemp->data[nLoop].description,
+                    cr.ref_text = cWriteText,
+                    cr.updt_id = reqinfo->updt_id,
+                    cr.updt_dt_tm = sysdate
+                where cr.ref_name = rRefTemp->data[nLoop].ref_name
+                and cr.ref_task = rRefTemp->data[nLoop].ref_task
+                and cr.parent_entity_id = rRefTemp->data[nLoop].parent_entity_id
+                and cr.parent_entity_name = rRefTemp->data[nLoop].parent_entity_name
+                and cr.sequence = nPiece
+                and cr.active_ind = 1
+            endif
+        endfor
+    endfor
+    
+    commit
+end
+
+; Inactivate
+subroutine inactivateRefData(null)    
+
+    set rRef->action = ^i^
+    
+    for (nLoop = 1 to size(rRefTemp->data, 5))
+        update into cust_co_reference       cr
+        set cr.active_ind = 0,
+            cr.updt_dt_tm = sysdate,
+            cr.updt_id = reqinfo->updt_id,
+            cr.end_effective_dt_tm = sysdate
+        where cr.ref_name = rRefTemp->data[nLoop].ref_name
+        and cr.ref_task = rRefTemp->data[nLoop].ref_task
+        and cr.parent_entity_id = rRefTemp->data[nLoop].parent_entity_id
+        and cr.parent_entity_name = rRefTemp->data[nLoop].parent_entity_name
+        and cr.active_ind = 1                           
+    endfor
+    
+    commit
+end
+    
+; Delete
+subroutine deleteRefData(null)
+
+    set rRef->action = ^d^
+    
+    for (nLoop = 1 to size(rRefTemp->data, 5))
+        delete from cust_co_reference       cr
+        where cr.ref_name = rRefTemp->data[nLoop].ref_name
+        and cr.ref_task = rRefTemp->data[nLoop].ref_task
+        and cr.parent_entity_id = rRefTemp->data[nLoop].parent_entity_id
+        and cr.parent_entity_name = rRefTemp->data[nLoop].parent_entity_name
+        and cr.active_ind = 1                                       
+    endfor
+    
+    commit
+end
+
+; Write the output back to the MPage
+call add_custom_output(cnvtrectojson(rRef, 4, 1)) 
+ 
+#end_program
+ 
+end go
+ 
 /*************************************************************************
  
         Script Name:    1co5_mpage_setup.prg
