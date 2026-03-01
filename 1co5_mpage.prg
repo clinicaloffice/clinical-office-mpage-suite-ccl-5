@@ -406,6 +406,137 @@ end
 end go
 /*************************************************************************
  
+        Script Name:    1co5_custom_tables.prg
+ 
+        Description:    Clinical Office MPage Suite Custom Tables Creation
+ 
+        Date Written:   February 8, 2026
+        Written by:     John Simpson
+                        Precision Healthcare Solutions
+ 
+ *************************************************************************
+            Copyright (c) 2025/2026 Precision Healthcare Solutions
+ 
+ NO PART OF THIS CODE MAY BE COPIED, MODIFIED OR DISTRIBUTED WITHOUT
+ PRIOR WRITTEN CONSENT OF PRECISION HEALTHCARE SOLUTIONS EXECUTIVE
+ LEADERSHIP TEAM.
+ 
+ FOR LICENSING TERMS PLEASE VISIT https://www.clinicaloffice.com
+
+ *************************************************************************
+                            Special Instructions
+ *************************************************************************
+ Need to cycle servers 58, 79, 178 and 179 after changes
+ 
+ *************************************************************************
+                            Revision Information
+ *************************************************************************
+ Rev    Date     By             Comments
+ ------ -------- -------------- ------------------------------------------
+ 001    02/08/26 J. Simpson     Initial Development
+ *************************************************************************/
+
+drop program 1co5_custom_tables:group1 go
+create program 1co5_custom_tables:group1
+
+prompt 
+	"Mode: (C)reate or (O)ragen" = "" 
+
+with mode
+
+declare table_exists(cTable=vc)=i4 with persist
+declare seq_exists(cSequence=vc)=i4 with persist
+
+if (cnvtupper($mode) = "C")
+
+    call echo("Creating Clinical Office MPage Suite tables")
+
+    ; Create the custom sequences
+    if (seq_exists("cust_co_ref_seq") = 0)
+        rdb create sequence cust_co_ref_seq end
+    endif
+        
+    ; Custom Reference Table    
+    if (table_exists("cust_co_reference") = 0)
+        select into table cust_co_reference
+            ref_id              = type("f8"),
+            ref_name            = type("vc40"),
+            ref_task            = type("vc40"),
+            description         = type("vc100"),
+            parent_entity_id    = type("f8"),
+            parent_entity_name  = type("vc32"),
+            sequence            = type("i4"),
+            ref_text            = type("zvc32000"),
+            active_ind          = type("i4"),
+            create_prsnl_id     = type("f8"),
+            create_dt_tm        = type("dq8"),
+            updt_id             = type("f8"),
+            updt_dt_tm          = type("dq8"),
+            beg_effective_dt_tm = type("dq8"),
+            end_effective_dt_tm = type("dq8")
+        from dummyt         d
+        with    constraint(ref_id, "primary key", "unique"),
+                index(ref_name, ref_task, parent_entity_id, sequence),
+                index(updt_dt_tm, updt_id),
+                synonym = "CUST_CO_REFERENCE",
+                organization = "P"        
+    endif
+    
+elseif (cnvtupper($mode) = "O")
+
+    drop table cust_co_reference
+    execute oragen3 "CUST_CO_REFERENCE"
+
+endif
+
+call echo("***********************************************************************************")
+call echo("                               OPERATION COMPLETE")
+call echo("***********************************************************************************")
+call echo("Please cycle servers 58, 79, 178 and 179 to reflect changes in Cerner applications.")
+call echo("***********************************************************************************")
+
+; Determines if a table exists in the dictionary
+subroutine table_exists(cTable)
+
+    declare nExists = i4 with noconstant(0)
+    
+    select into "nl:"
+    from    dba_tables      d
+    plan d
+        where d.table_name = cnvtupper(cTable)
+    detail
+        nExists = 1
+
+        call echo(concat("Table ", cTable, " exists and will not be created."))
+
+    with counter    
+    
+    return (nExists)
+
+end
+
+; Determines if a sequence exists in the dictionary
+subroutine seq_exists(cSequence)
+
+    declare nExists = i4 with noconstant(0)
+    
+    select into "nl:"
+    from    dba_sequences   d
+    plan d
+        where d.sequence_name = cnvtupper(cSequence)
+    detail
+        nExists = 1
+        
+        call echo(concat("Sequence ", cSequence, " exists and will not be created."))
+    with counter
+    
+    return (nExists)
+
+end
+        
+end go
+/*************************************************************************
+ 
         Script Name:    1co_enc_search.prg
  
         Description:    Clinical Office - mPage Edition
@@ -7337,7 +7468,11 @@ if (validate(payload->customscript->script[nscript]->action) = 1 and validate(pa
     set stat = alterlist(rRefTemp->data, size(payload->customScript->script[nScript].data, 5))
     for (nLoop = 1 to size(payload->customScript->script[nScript].data, 5))
         set rRefTemp->data[nLoop].ref_name = payload->customScript->script[nScript].data[nLoop].refName
-        set rRefTemp->data[nLoop].ref_task = payload->customScript->script[nScript].data[nLoop].refTask
+        if (validate(payload->customScript->script[nScript].data[nLoop].refTask) = 1)
+            set rRefTemp->data[nLoop].ref_task = payload->customScript->script[nScript].data[nLoop].refTask
+        else
+            set rRefTemp->data[nLoop].ignore_task = 1
+        endif
         if (validate(payload->customScript->script[nScript].data[nLoop].description) = 1)
             set rRefTemp->data[nLoop].description = payload->customScript->script[nScript].data[nLoop].description
         endif
@@ -7379,7 +7514,7 @@ end go
  
 /*************************************************************************
  
-        Script Name:    1co5_mpage_ref_data.prg
+        Script Name:    1co5_mpage_ref_data_lib.prg
  
         Description:    Clinical Office - MPage Developer
         				Custom Clinical OFfice Read/Write Script Subroutine Library
@@ -7429,6 +7564,7 @@ record rRefTemp (
         2 ref_name                  = vc
         2 ref_task                  = vc
         2 description               = vc
+        2 ignore_task               = i4        
         2 qual_parent_entity        = i4
         2 parent_entity_id          = f8
         2 parent_entity_name        = vc
@@ -7470,6 +7606,8 @@ subroutine readRefData(cAction)
                         concat(^cr.parent_entity_id=^, build(rRefTemp->data[nLoop].parent_entity_id),
                             ^ and cr.parent_entity_name="^, trim(rRefTemp->data[nLoop].parent_entity_name), ^"^),
                             ^1=1^)
+
+        call echo(cParser)
             
         select into "nl:"
             active_ind      = cr.active_ind,
@@ -7480,7 +7618,7 @@ subroutine readRefData(cAction)
                 prsnl               pu
         plan cr
             where cr.ref_name = rRefTemp->data[nLoop].ref_name
-            and cr.ref_task = rRefTemp->data[nLoop].ref_task
+            and (rRefTemp->data[nLoop].ignore_task = 1 or cr.ref_task = rRefTemp->data[nLoop].ref_task)
             and parser(cParser)
             and (cAction = ^ra^ or cr.active_ind = 1)
         join pc
@@ -7499,18 +7637,18 @@ subroutine readRefData(cAction)
                 nCount = nCount + 1
                 stat = alterlist(rRef->data, nCount)
                 rRef->data[nCount].ref_name = cr.ref_name
-                 rRef->data[nCount].ref_task = cr.ref_task
-                 rRef->data[nCount].description = cr.description
-                 rRef->data[nCount].parent_entity_id = cr.parent_entity_id
-                 rRef->data[nCount].parent_entity_name = cr.parent_entity_name
-                 rRef->data[nCount].create_prsnl_id = cr.create_prsnl_id
-                 rRef->data[nCount].create_prsnl_name = pc.name_full_formatted
-                 rRef->data[nCount].active_ind = cr.active_ind
-                 rRef->data[nCount].updt_id = cr.updt_id
-                 rRef->data[nCount].updt_name = pu.name_full_formatted
-                 rRef->data[nCount].updt_dt_tm = cr.updt_dt_tm
-                 rRef->data[nCount].beg_effective_dt_tm = cr.beg_effective_dt_tm
-                 rRef->data[nCount].end_effective_dt_tm = cr.end_effective_dt_tm                    
+                rRef->data[nCount].ref_task = cr.ref_task
+                rRef->data[nCount].description = cr.description
+                rRef->data[nCount].parent_entity_id = cr.parent_entity_id
+                rRef->data[nCount].parent_entity_name = cr.parent_entity_name
+                rRef->data[nCount].create_prsnl_id = cr.create_prsnl_id
+                rRef->data[nCount].create_prsnl_name = pc.name_full_formatted
+                rRef->data[nCount].active_ind = cr.active_ind
+                rRef->data[nCount].updt_id = cr.updt_id
+                rRef->data[nCount].updt_name = pu.name_full_formatted
+                rRef->data[nCount].updt_dt_tm = cr.updt_dt_tm
+                rRef->data[nCount].beg_effective_dt_tm = cr.beg_effective_dt_tm
+                rRef->data[nCount].end_effective_dt_tm = cr.end_effective_dt_tm                    
             endif
         head sequence
             nRecords = nRecords + 1
@@ -7646,7 +7784,9 @@ subroutine deleteRefData(null)
 end
 
 ; Write the output back to the MPage
-call add_custom_output(cnvtrectojson(rRef, 4, 1)) 
+if (validate(add_custom_output) = 1)
+    call add_custom_output(cnvtrectojson(rRef, 4, 1)) 
+endif
  
 #end_program
  
